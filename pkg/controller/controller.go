@@ -3,9 +3,9 @@ package controller
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/credentials"
-	"k8s.io/client-go/kubernetes"
 	"github.com/zduymz/elb-inject/pkg/apis/elb-inject"
 	"github.com/zduymz/elb-inject/pkg/provider"
+	"k8s.io/client-go/kubernetes"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -158,9 +158,6 @@ func (c *Controller) processNextWorkItem() bool {
 	return true
 }
 
-// syncHandler compares the actual state with the desired, and attempts to
-// converge the two. It then updates the Status block of the Foo resource
-// with the current status of the resource.
 func (c *Controller) syncHandler(key string) error {
 	// Convert the namespace/name string into a distinct namespace and name
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
@@ -172,7 +169,7 @@ func (c *Controller) syncHandler(key string) error {
 	// Get the pod with this namespace/name
 	po, err := c.podLister.Pods(namespace).Get(name)
 	if err != nil {
-		// The Foo resource may no longer exist, in which case we stop processing
+		// If no longer exist, in which case we stop processing
 		if errors.IsNotFound(err) {
 			utilruntime.HandleError(fmt.Errorf("foo '%s' in work queue no longer exists", key))
 			return nil
@@ -182,16 +179,21 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	// make sure pod is running
-	if podStatus := po.Status.Phase; podStatus != corev1.PodRunning {
-		klog.Infof("Pod %s : %s ", po.GetName(), po.Status.Phase)
+	if !c.isPodRunning(po) {
+		utilruntime.HandleError(fmt.Errorf("Pod %s : %s ", po.GetName(), po.Status.Phase))
 		return fmt.Errorf("Pod not running")
 	}
 
 	//TODO: need to check is ready to serve traffic
 	// Not sure this is good solution but it worked for now
-	if !isReady(&po.Status.ContainerStatuses) {
+	if !c.isPodReady(po) {
 		klog.Infof("Pod [%s] is not ready, can not inject", po.GetName())
 		return fmt.Errorf("Pod is not ready")
+	}
+
+	// double check
+	if should := c.shouldInject(po); !should {
+		return nil
 	}
 
 	targetGroup := po.Annotations[annotationInject]
@@ -252,7 +254,7 @@ func (c *Controller) handleAddObject(obj interface{}) {
 		return
 	}
 
-	if should := c.shouldInject(po, po.GetNamespace()); should {
+	if should := c.shouldInject(po); should {
 		klog.Infof("Injecting object: %s", po.GetName())
 		c.enqueuePod(po)
 		return
@@ -297,11 +299,11 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 	}
 }
 
-func (c *Controller) shouldInject(pod *corev1.Pod, namespace string) bool {
+func (c *Controller) shouldInject(pod *corev1.Pod) bool {
 
 	// Don't inject in the Kubernetes system namespaces
 	for _, ns := range kubeSystemNamespaces {
-		if namespace == ns {
+		if pod.GetNamespace() == ns {
 			return false
 		}
 	}
@@ -319,11 +321,18 @@ func (c *Controller) shouldInject(pod *corev1.Pod, namespace string) bool {
 	return true
 }
 
-func isReady(ContainerStatuses *[]corev1.ContainerStatus) bool {
-	for _, containerStatus := range *ContainerStatuses {
+func (c *Controller) isPodReady(pod *corev1.Pod) bool {
+	for _, containerStatus := range pod.Status.ContainerStatuses {
 		if ! containerStatus.Ready {
 			return false
 		}
+	}
+	return true
+}
+
+func (c *Controller) isPodRunning(pod *corev1.Pod) bool {
+	if podStatus := pod.Status.Phase; podStatus != corev1.PodRunning {
+		return false
 	}
 	return true
 }
