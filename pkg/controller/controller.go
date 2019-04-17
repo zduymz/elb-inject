@@ -278,20 +278,17 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 
 	klog.Infof("Processing object: %s", object.GetName())
 
-	// TODO: should we check object KIND before converting?
-	po, err := c.podLister.Pods(object.GetNamespace()).Get(object.GetName())
-	if err != nil {
-		klog.Infof("ignoring orphaned object '%s' of foo '%s'", object.GetSelfLink(), object.GetName())
-		return
-	}
+	po := obj.(*corev1.Pod)
 	// pod should have been injected
 	if po.Annotations[annotationStatus] == "" {
+		klog.Errorf("Not found %s ", annotationStatus)
 		return
 	}
 
 	// pod should contain annotationInject
 	targetGroup := po.Annotations[annotationInject]
 	if targetGroup == "" {
+		klog.Errorf("Not found %s", annotationInject)
 		return
 	}
 
