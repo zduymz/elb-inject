@@ -1,18 +1,25 @@
-.PHONY: linux macos
+.PHONY: linux macos docker run
 
-BINARY ?= elb-inject
+NAME ?= elb-inject
 LDFLAGS ?= -X=main.version=$(VERSION) -w -s
-#VERSION ?= $(shell git describe --tags --always --dirty)
-VERSION ?= '0.0.1'
+VERSION ?= $(shell git describe --tags --always --dirty)
 BUILD_FLAGS ?= -v
 CGO_ENABLED ?= 0
 
 
 macos:
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=${CGO_ENABLED} go build -o build/macos/${BINARY} ${BUILD_FLAGS} -ldflags "$(LDFLAGS)" $^
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=${CGO_ENABLED} go build -o build/macos/${NAME} ${BUILD_FLAGS} -ldflags "$(LDFLAGS)" $^
 
 linux:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=${CGO_ENABLED} go build -o build/linux/${BINARY} ${BUILD_FLAGS} -ldflags "$(LDFLAGS)" $^
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=${CGO_ENABLED} go build -o build/linux/${NAME} ${BUILD_FLAGS} -ldflags "$(LDFLAGS)" $^
+
+docker: linux
+	docker build --no-cache --squash --rm -t ${NAME}:latest
+	docker tag ${NAME}:latest duym/${NAME}:latest
+	docker push duym/${NAME}:latest
 
 run:
-	./build/macos/${BINARY} -kubeconfig=./minikube.config
+	./build/macos/${NAME} -kubeconfig=./staging.config
+
+test:
+	go test -v -race $(shell go list ./... )

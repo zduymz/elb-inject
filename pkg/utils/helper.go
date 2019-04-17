@@ -9,7 +9,7 @@ func DumpObject(obj interface{})  {
 }
 
 func Log(s string) {
-	klog.Info("%s \n", s)
+	klog.Infof("%s \n", s)
 }
 
 // check the list contain string

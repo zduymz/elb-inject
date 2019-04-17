@@ -113,7 +113,7 @@ func (p *AWSProvider) RegisterIPToTargetGroup(targetGroupName *string, IPAddress
 	}
 
 	if exist := targetGroups[*targetGroupName]; exist == nil {
-		klog.Errorf("TargetGroupName: %s is not found", targetGroupName)
+		klog.Errorf("TargetGroupName: %s is not found", *targetGroupName)
 		// TODO: should put back to the queue or throw away?
 		return fmt.Errorf("TargetGroup not found")
 	}
@@ -142,7 +142,7 @@ func (p *AWSProvider) DeregisterIPToTargetGroup(targetGroupName *string, IPAddre
 	}
 
 	if exist := targetGroups[*targetGroupName]; exist == nil {
-		klog.Errorf("TargetGroupName: %s is not found", targetGroupName)
+		klog.Errorf("TargetGroupName: %s is not found", *targetGroupName)
 		// TODO: should put back to the queue or throw away?
 		// When this case happen?
 		return fmt.Errorf("TargetGroup not found")
