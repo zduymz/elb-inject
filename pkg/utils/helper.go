@@ -5,7 +5,7 @@ import "k8s.io/klog"
 // All dummy function should stay here
 
 func DumpObject(obj interface{})  {
-	klog.Info("\n %+v \n", obj)
+	klog.Info(obj)
 }
 
 func Log(s string) {
