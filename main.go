@@ -51,11 +51,10 @@ func main() {
 }
 
 func init() {
-	flag.StringVar(&config.KubeConfig, "kubeconfig", "./minikube.config", "Hello")
-	flag.StringVar(&config.Master, "master", "", "Hello")
-	flag.StringVar(&config.AWSRegion, "aws.region", "us-west-2", "Hello")
-	flag.StringVar(&config.AWSVPCId, "aws.vpcid", "vpc-9931a0fc", "Hello")
-	flag.IntVar(&config.APIRetries, "aws.retries", 3, "Hello")
-	flag.StringVar(&config.AWSAssumeRole, "aws.sts", "", "Hello")
-	flag.StringVar(&config.AWSCredsFile, "aws.creds", "/Users/dmai/.aws/credentials", "Hello")
+	flag.StringVar(&config.KubeConfig, "kubeconfig", "", "kubeconfig")
+	flag.StringVar(&config.Master, "master", "", "master url")
+	flag.StringVar(&config.AWSRegion, "aws.region", "us-west-2", "aws region")
+	flag.IntVar(&config.APIRetries, "aws.retries", 3, "aws api call retries")
+	flag.StringVar(&config.AWSAssumeRole, "aws.role", "", "aws assume role")
+	flag.StringVar(&config.AWSCredsFile, "aws.creds", "", "aws creds")
 }

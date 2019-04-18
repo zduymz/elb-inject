@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/zduymz/elb-inject/pkg/apis/elb-inject"
 	"github.com/zduymz/elb-inject/pkg/provider"
 	"k8s.io/client-go/kubernetes"
@@ -48,11 +47,11 @@ type Controller struct {
 
 func NewController(podInformer coreinformers.PodInformer, kubeclientset kubernetes.Interface, config *elb_inject.Config) (*Controller, error) {
 	klog.Info("Setting up AWS")
+
 	p, err := provider.NewAWSProvider(provider.AWSConfig{
 		Region:     config.AWSRegion,
-		VpcId:      config.AWSVPCId,
 		AssumeRole: config.AWSAssumeRole,
-		AWSCreds:   credentials.NewSharedCredentials(config.AWSCredsFile, "default"),
+		AWSCredsFile:   config.AWSCredsFile,
 		APIRetries: 3,
 		DryRun:     false,
 	})
@@ -245,7 +244,7 @@ func (c *Controller) handleAddObject(obj interface{}) {
 		klog.Infof("Recovered deleted object '%s' from tombstone", object.GetName())
 	}
 
-	klog.Infof("Processing object: %s", object.GetName())
+	klog.V(4).Infof("Processing object: %s", object.GetName())
 
 	// TODO: should we check object KIND before converting?
 	po, err := c.podLister.Pods(object.GetNamespace()).Get(object.GetName())

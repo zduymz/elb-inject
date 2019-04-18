@@ -14,12 +14,12 @@ linux:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=${CGO_ENABLED} go build -o build/linux/${NAME} ${BUILD_FLAGS} -ldflags "$(LDFLAGS)" $^
 
 docker: linux
-	docker build --no-cache --squash --rm -t ${NAME}:latest
+	docker build --no-cache --squash --rm -t ${NAME}:latest .
 	docker tag ${NAME}:latest duym/${NAME}:latest
 	docker push duym/${NAME}:latest
 
 run:
-	./build/macos/${NAME} -kubeconfig=./staging.config
+	./build/macos/${NAME} -kubeconfig=./staging.config -aws.creds=/Users/dmai/.aws/credentials
 
 test:
 	go test -v -race $(shell go list ./... )

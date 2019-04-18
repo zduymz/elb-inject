@@ -25,11 +25,11 @@ type AWSProvider struct {
 // AWSConfig contains configuration to create a new AWS provider.
 type AWSConfig struct {
 	Region     string
-	VpcId      string
-	AWSCreds   *credentials.Credentials
 	AssumeRole string
 	APIRetries int
 	DryRun     bool
+
+	AWSCredsFile   string
 }
 
 // NewAWSProvider initializes a new AWS Route53 based Provider.
@@ -37,9 +37,10 @@ func NewAWSProvider(awsConfig AWSConfig) (*AWSProvider, error) {
 	config := aws.NewConfig().WithMaxRetries(awsConfig.APIRetries).WithRegion(awsConfig.Region)
 
 	// Only use for testing
-	if awsConfig.AWSCreds != nil {
+	if awsConfig.AWSCredsFile != "" {
 		klog.Warning("Not use aws credentials when running on production")
-		config.WithCredentials(awsConfig.AWSCreds)
+
+		config.WithCredentials(credentials.NewSharedCredentials(awsConfig.AWSCredsFile, "default"))
 	}
 
 	config.WithHTTPClient(
