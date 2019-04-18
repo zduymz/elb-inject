@@ -1,4 +1,4 @@
-.PHONY: linux macos docker run
+.PHONY: linux macos docker run test clean
 
 NAME ?= elb-inject
 LDFLAGS ?= -X=main.version=$(VERSION) -w -s
@@ -23,3 +23,7 @@ run:
 
 test:
 	go test -v -race $(shell go list ./... )
+
+clean:
+	- rm -fr ./build/*
+	- docker rmi `docker images -f "dangling=true" -q --no-trunc`
