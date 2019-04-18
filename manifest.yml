@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elb-inject
+spec:
+  selector:
+    matchLabels:
+      app: elb-inject
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: elb-inject
+    spec:
+      serviceAccountName: elb-inject
+      containers:
+      - name: elb-inject
+        image: duym/elb-inject:latest
+        imagePullPolicy: Always
