@@ -116,7 +116,8 @@ func (p *AWSProvider) RegisterIPToTargetGroup(targetGroupName *string, IPAddress
 	if exist := targetGroups[*targetGroupName]; exist == nil {
 		klog.Errorf("TargetGroupName: %s is not found", *targetGroupName)
 		// TODO: should put back to the queue or throw away?
-		return fmt.Errorf("TargetGroup not found")
+		// I choose throwing it away
+		return nil
 	}
 
 	target := &elbv2.TargetDescription{

@@ -133,14 +133,14 @@ func (c *Controller) processNextWorkItem() bool {
 		// obj in form of namespace/name
 		if key, ok = obj.(string); !ok {
 			c.workqueue.Forget(obj)
-			utilruntime.HandleError(fmt.Errorf("expected string in workqueue but got %#v", obj))
+			klog.Errorf("expected string in workqueue but got %#v", obj)
 			return nil
 		}
 		// Run the syncHandler, passing it the namespace/name string of the
-		klog.Infof("syncHanlder key %s", key)
+		klog.V(4).Infof("syncHanlder key %s", key)
 		if err := c.syncHandler(key); err != nil {
 			c.workqueue.AddRateLimited(key)
-			return fmt.Errorf("error syncing '%s': %s, requeuing", key, err.Error())
+			return fmt.Errorf("error syncing '%s': %s, Requeuing", key, err.Error())
 		}
 		// Finally, if no error occurs we Forget this item so it does not
 		// get queued again until another change happens.
@@ -170,7 +170,7 @@ func (c *Controller) syncHandler(key string) error {
 	if err != nil {
 		// If no longer exist, in which case we stop processing
 		if errors.IsNotFound(err) {
-			utilruntime.HandleError(fmt.Errorf("foo '%s' in work queue no longer exists", key))
+			klog.Warningf("object '%s' in work queue no longer exists", key)
 			return nil
 		}
 
@@ -179,7 +179,7 @@ func (c *Controller) syncHandler(key string) error {
 
 	// make sure pod is running
 	if !c.isPodRunning(po) {
-		utilruntime.HandleError(fmt.Errorf("Pod %s : %s ", po.GetName(), po.Status.Phase))
+		klog.Errorf("Pod %s : %s ", po.GetName(), po.Status.Phase)
 		return fmt.Errorf("Pod not running")
 	}
 
@@ -196,12 +196,12 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	targetGroup := po.Annotations[annotationInject]
-	klog.Infof("Starting register IP to Target: %s", targetGroup)
+	klog.Infof("Starting register [%s] to Target: [%s]", po.Status.PodIP, targetGroup)
 	if err := c.provider.RegisterIPToTargetGroup(&targetGroup, &po.Status.PodIP); err != nil {
 		return err
 	}
 
-	klog.Info("Starting modify pod template")
+	klog.V(4).Info("Adding `injected` annotation to pod template")
 	if err := c.updatePodAnnotation(po); err != nil {
 		return err
 	}
@@ -233,12 +233,12 @@ func (c *Controller) handleAddObject(obj interface{}) {
 	if object, ok = obj.(metav1.Object); !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
-			utilruntime.HandleError(fmt.Errorf("error decoding object, invalid type"))
+			klog.Errorf("error decoding object, invalid type")
 			return
 		}
 		object, ok = tombstone.Obj.(metav1.Object)
 		if !ok {
-			utilruntime.HandleError(fmt.Errorf("error decoding object tombstone, invalid type"))
+			klog.Errorf("error decoding object tombstone, invalid type")
 			return
 		}
 		klog.Infof("Recovered deleted object '%s' from tombstone", object.GetName())
@@ -249,7 +249,7 @@ func (c *Controller) handleAddObject(obj interface{}) {
 	// TODO: should we check object KIND before converting?
 	po, err := c.podLister.Pods(object.GetNamespace()).Get(object.GetName())
 	if err != nil {
-		klog.Infof("ignoring orphaned object '%s' of foo '%s'", object.GetSelfLink(), object.GetName())
+		klog.Infof("Ignoring orphaned object [%s] ", object.GetName())
 		return
 	}
 
@@ -266,36 +266,37 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 	if object, ok = obj.(metav1.Object); !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
-			utilruntime.HandleError(fmt.Errorf("error decoding object, invalid type"))
+			klog.Errorf("error decoding object, invalid type")
 			return
 		}
 		object, ok = tombstone.Obj.(metav1.Object)
 		if !ok {
-			utilruntime.HandleError(fmt.Errorf("error decoding object tombstone, invalid type"))
+			klog.Errorf("error decoding object tombstone, invalid type")
 			return
 		}
 		klog.Infof("Recovered deleted object '%s' from tombstone", object.GetName())
 	}
 
-	klog.Infof("Processing object: %s", object.GetName())
+	klog.V(4).Infof("Processing object: %s", object.GetName())
 
 	po := obj.(*corev1.Pod)
 	// pod should have been injected
 	if po.Annotations[annotationStatus] == "" {
-		klog.Errorf("Not found %s ", annotationStatus)
+		klog.Errorf("Not found %s in %s", annotationStatus, po.GetName())
 		return
 	}
 
 	// pod should contain annotationInject
 	targetGroup := po.Annotations[annotationInject]
 	if targetGroup == "" {
-		klog.Errorf("Not found %s", annotationInject)
+		klog.Errorf("Not found %s in %s", annotationInject, po.GetName())
 		return
 	}
 
 	if err := c.provider.DeregisterIPToTargetGroup(&targetGroup, &po.Status.PodIP); err != nil {
-		klog.Errorf("Can not deregister pod %s", po.GetName())
+		klog.Errorf("Can not deregister pod %s - %s", po.GetName(), po.Status.PodIP)
 	}
+	klog.Infof("Deregister [%s] from [%s] sucessfully", po.Status.PodIP, targetGroup)
 }
 
 func (c *Controller) shouldInject(pod *corev1.Pod) bool {

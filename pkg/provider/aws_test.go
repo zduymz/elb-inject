@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/elbv2"
+	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func (s *mockSession) DescribeTargetGroups(input *elbv2.DescribeTargetGroupsInpu
 				},
 				Port:                    aws.Int64(80),
 				Protocol:                aws.String("HTTP"),
-				TargetGroupArn:          aws.String("arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/dmai-test-2/bca448b0f9c74944"),
+				TargetGroupArn:          aws.String("please-return-error"),
 				TargetGroupName:         aws.String("dmai-test-2"),
 				TargetType:              aws.String("ip"),
 				UnhealthyThresholdCount: aws.Int64(3),
@@ -140,12 +141,29 @@ func NewMockAWSProvider() *AWSProvider {
 	return provider
 }
 
-func TestRegister(t *testing.T) {
+func TestGetTargetGroups(t *testing.T) {
+	provider := NewMockAWSProvider()
+	targetGroups, _ := provider.getTargetGroups()
+	expectedTargetGroups := map[string]*string{
+		"dmai-test-0": aws.String("arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/devops-graylog/efb439fb328cf038"),
+		"dmai-test-1":  aws.String("arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/devops-graylog-fluent/167d61f098a726ce"),
+		"dmai-test-2": aws.String("please-return-error"),
+		"dmai-test-3": aws.String("arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/dmai-test-3/ac0e6820c8cbd875"),
+	}
 
-
+	assert.Equal(t, targetGroups, expectedTargetGroups)
 
 }
 
-func TestDeregister(t *testing.T) {
+func TestRegister(t *testing.T) {
+	provider := NewMockAWSProvider()
+	err := provider.RegisterIPToTargetGroup(aws.String("dmai-test-2"), aws.String("1.1.1.1"))
+	assert.NotEqual(t, err, nil)
 
+	err = provider.RegisterIPToTargetGroup(aws.String("dmai-test-0"), aws.String("1.1.1.1"))
+	assert.Equal(t, err, nil)
+}
+
+func TestDeregister(t *testing.T) {
+	// what if deregistering IP failed?
 }
