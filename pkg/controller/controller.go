@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/zduymz/elb-inject/pkg/apis/elb-inject"
 	"github.com/zduymz/elb-inject/pkg/provider"
+	"github.com/zduymz/elb-inject/pkg/utils"
 	"k8s.io/client-go/kubernetes"
 	"time"
 
@@ -30,10 +31,11 @@ const (
 )
 
 var (
-	// i don't want to mess up with namespace system and public
+	// exclude namespaces don't want to inject
 	kubeSystemNamespaces = []string{
 		metav1.NamespaceSystem,
 		metav1.NamespacePublic,
+		"monitor",
 	}
 )
 
@@ -43,17 +45,18 @@ type Controller struct {
 	hasSynced     cache.InformerSynced
 	workqueue     workqueue.RateLimitingInterface
 	provider      *provider.AWSProvider
+	slack         utils.Slack
 }
 
 func NewController(podInformer coreinformers.PodInformer, kubeclientset kubernetes.Interface, config *elb_inject.Config) (*Controller, error) {
 	klog.Info("Setting up AWS")
 
 	p, err := provider.NewAWSProvider(provider.AWSConfig{
-		Region:     config.AWSRegion,
-		AssumeRole: config.AWSAssumeRole,
-		AWSCredsFile:   config.AWSCredsFile,
-		APIRetries: 3,
-		DryRun:     false,
+		Region:       config.AWSRegion,
+		AssumeRole:   config.AWSAssumeRole,
+		AWSCredsFile: config.AWSCredsFile,
+		APIRetries:   3,
+		DryRun:       false,
 	})
 	if err != nil {
 		klog.Errorf("Error: %s", err.Error())
@@ -66,6 +69,7 @@ func NewController(podInformer coreinformers.PodInformer, kubeclientset kubernet
 		workqueue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ELB Register"),
 		provider:      p,
 		kubeclientset: kubeclientset,
+		slack:         utils.Slack{WebHookUrl: config.SlackWebHook},
 	}
 
 	klog.Info("Setting up event handlers")
@@ -137,15 +141,16 @@ func (c *Controller) processNextWorkItem() bool {
 			return nil
 		}
 		// Run the syncHandler, passing it the namespace/name string of the
-		klog.V(4).Infof("syncHanlder key %s", key)
+		klog.Infof("Start: %s", key)
 		if err := c.syncHandler(key); err != nil {
 			c.workqueue.AddRateLimited(key)
-			return fmt.Errorf("error syncing '%s': %s, Requeuing", key, err.Error())
+			klog.V(4).Infof("error '%s': %v, Requeue", key, err)
+			return nil
 		}
 		// Finally, if no error occurs we Forget this item so it does not
 		// get queued again until another change happens.
+		klog.Infof("Finish: '%s'", key)
 		c.workqueue.Forget(obj)
-		klog.Infof("Successfully synced '%s'", key)
 		return nil
 	}(obj)
 
@@ -170,7 +175,7 @@ func (c *Controller) syncHandler(key string) error {
 	if err != nil {
 		// If no longer exist, in which case we stop processing
 		if errors.IsNotFound(err) {
-			klog.Warningf("object '%s' in work queue no longer exists", key)
+			klog.Warningf("object '%s' in workqueue no longer exists", key)
 			return nil
 		}
 
@@ -183,12 +188,12 @@ func (c *Controller) syncHandler(key string) error {
 		return fmt.Errorf("Pod not running")
 	}
 
-	//TODO: need to check is ready to serve traffic
+	// TODO: need to check is ready to serve traffic
 	// Not sure this is good solution but it worked for now
-	if !c.isPodReady(po) {
-		klog.Infof("Pod [%s] is not ready, can not inject", po.GetName())
-		return fmt.Errorf("Pod is not ready")
-	}
+	//if !c.isPodReady(po) {
+	//	klog.Infof("Pod [%s] is not ready, can not inject", po.GetName())
+	//	return fmt.Errorf("Pod is not ready")
+	//}
 
 	// double check
 	if should := c.shouldInject(po); !should {
@@ -201,7 +206,7 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
-	klog.V(4).Info("Adding `injected` annotation to pod template")
+	klog.Info("Adding `injected` annotation to pod template")
 	if err := c.updatePodAnnotation(po); err != nil {
 		return err
 	}
@@ -280,23 +285,28 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 	klog.V(4).Infof("Processing object: %s", object.GetName())
 
 	po := obj.(*corev1.Pod)
+	// some pod deleted so quickly. so can not get IP and failed to deregister bc missing IP
+	podIP := po.Status.PodIP
+	podName := po.Name
+	targetGroup := po.Annotations[annotationInject]
 	// pod should have been injected
 	if po.Annotations[annotationStatus] == "" {
-		klog.Errorf("Not found %s in %s", annotationStatus, po.GetName())
+		klog.Errorf("Not found %s in %s", annotationStatus, podName)
 		return
 	}
 
 	// pod should contain annotationInject
-	targetGroup := po.Annotations[annotationInject]
 	if targetGroup == "" {
-		klog.Errorf("Not found %s in %s", annotationInject, po.GetName())
+		klog.Errorf("Not found %s in %s", annotationInject, podName)
 		return
 	}
 
-	if err := c.provider.DeregisterIPToTargetGroup(&targetGroup, &po.Status.PodIP); err != nil {
-		klog.Errorf("Can not deregister pod %s - %s", po.GetName(), po.Status.PodIP)
+	if err := c.provider.DeregisterIPFromTargetGroup(targetGroup, podIP); err != nil {
+		klog.Errorf("Can not deregister pod %s[%s] from %s. Reason: %v", podName, podIP, targetGroup, err)
+		c.slack.SendSlackNotification(fmt.Sprintf("```Can not deregister pod %s[%s] from %s. Reason: %v```", podName, podIP, targetGroup, err))
+		return
 	}
-	klog.Infof("Deregister [%s] from [%s] sucessfully", po.Status.PodIP, targetGroup)
+	klog.Infof("Deregister [%s] from [%s] sucessfully", podIP, targetGroup)
 }
 
 func (c *Controller) shouldInject(pod *corev1.Pod) bool {

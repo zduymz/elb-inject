@@ -57,4 +57,5 @@ func init() {
 	flag.IntVar(&config.APIRetries, "aws.retries", 3, "aws api call retries")
 	flag.StringVar(&config.AWSAssumeRole, "aws.role", "", "aws assume role")
 	flag.StringVar(&config.AWSCredsFile, "aws.creds", "", "aws creds")
+	flag.StringVar(&config.SlackWebHook, "slack", "", "slack incoming webhook")
 }

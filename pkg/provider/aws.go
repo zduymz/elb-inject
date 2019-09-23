@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
@@ -29,7 +28,7 @@ type AWSConfig struct {
 	APIRetries int
 	DryRun     bool
 
-	AWSCredsFile   string
+	AWSCredsFile string
 }
 
 // NewAWSProvider initializes a new AWS Route53 based Provider.
@@ -115,8 +114,6 @@ func (p *AWSProvider) RegisterIPToTargetGroup(targetGroupName *string, IPAddress
 
 	if exist := targetGroups[*targetGroupName]; exist == nil {
 		klog.Errorf("TargetGroupName: %s is not found", *targetGroupName)
-		// TODO: should put back to the queue or throw away?
-		// I choose throwing it away
 		return nil
 	}
 
@@ -137,30 +134,28 @@ func (p *AWSProvider) RegisterIPToTargetGroup(targetGroupName *string, IPAddress
 	return nil
 }
 
-func (p *AWSProvider) DeregisterIPToTargetGroup(targetGroupName *string, IPAddress *string) error {
+func (p *AWSProvider) DeregisterIPFromTargetGroup(targetGroupName string, IPAddress string) error {
 	targetGroups, err := p.getTargetGroups()
 	if err != nil {
 		return err
 	}
 
-	if exist := targetGroups[*targetGroupName]; exist == nil {
-		klog.Errorf("TargetGroupName: %s is not found", *targetGroupName)
-		// TODO: should put back to the queue or throw away?
-		// When this case happen?
-		return fmt.Errorf("TargetGroup not found")
+	if exist := targetGroups[targetGroupName]; exist == nil {
+		klog.Errorf("TargetGroupName: %s is not found", targetGroupName)
 	}
 
 	target := &elbv2.TargetDescription{
-		Id: IPAddress,
+		Id: &IPAddress,
 	}
 
 	params := &elbv2.DeregisterTargetsInput{
-		TargetGroupArn: targetGroups[*targetGroupName],
+		TargetGroupArn: targetGroups[targetGroupName],
 		Targets:        []*elbv2.TargetDescription{target},
 	}
 
+	// TODO: should add context and retry for aws request.
+	// should use DeregisterTargetsWithContext
 	if _, err := p.client.DeregisterTargets(params); err != nil {
-		klog.Errorf("Can not register %s to targetGroup %s. Reason: %s", *IPAddress, *targetGroupName, err.Error())
 		return err
 	}
 

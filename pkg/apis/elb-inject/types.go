@@ -9,8 +9,10 @@ type Config struct {
 	AWSRegion      string
 	AWSVPCId       string
 	APIRetries     int
+	SlackWebHook   string
 
 	// Just use for testing purpse
 	AWSCredsFile   string
 	KubeConfig     string
 }
+
