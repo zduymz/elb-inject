@@ -216,7 +216,7 @@ func (c *Controller) syncHandler(key string) error {
 
 func (c *Controller) updatePodAnnotation(po *corev1.Pod) error {
 	poCopy := po.DeepCopy()
-	poCopy.Annotations[annotationStatus] = "true"
+	poCopy.Annotations[annotationStatus] = po.Status.PodIP
 	_, err := c.kubeclientset.CoreV1().Pods(poCopy.GetNamespace()).Update(poCopy)
 	return err
 }
@@ -286,7 +286,7 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 
 	po := obj.(*corev1.Pod)
 	// some pod deleted so quickly. so can not get IP and failed to deregister bc missing IP
-	podIP := po.Status.PodIP
+	podIP := po.Annotations[annotationStatus]
 	podName := po.Name
 	targetGroup := po.Annotations[annotationInject]
 	// pod should have been injected
