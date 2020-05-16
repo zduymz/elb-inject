@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/elbv2"
+	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/assert"
+	"github.com/zduymz/elb-inject/pkg/utils"
+
 	"math/rand"
 	"testing"
 	"time"
@@ -13,7 +16,7 @@ import (
 //TODO: write more test cases
 type mockSession struct{}
 
-func (s *mockSession) DescribeTargetGroups(input *elbv2.DescribeTargetGroupsInput) (*elbv2.DescribeTargetGroupsOutput, error) {
+func (s *mockSession) DescribeTargetGroups(_ *elbv2.DescribeTargetGroupsInput) (*elbv2.DescribeTargetGroupsOutput, error) {
 	// should return different result depend on input
 
 	output := &elbv2.DescribeTargetGroupsOutput{
@@ -122,6 +125,10 @@ func (s *mockSession) DeregisterTargets(input *elbv2.DeregisterTargetsInput) (*e
 	randomErrors := []error{
 		fmt.Errorf(elbv2.ErrCodeTargetGroupNotFoundException),
 		fmt.Errorf(elbv2.ErrCodeInvalidTargetException),
+		utils.AWSDeregisterError{
+			TargetGroupARN: "fake-target-group",
+			Err:            fmt.Errorf(elbv2.ErrCodeInvalidTargetException),
+		},
 	}
 	rand.Seed(time.Now().Unix())
 	if *input.TargetGroupArn == "please-return-error" {
@@ -136,6 +143,7 @@ func NewMockAWSProvider() *AWSProvider {
 	provider := &AWSProvider{
 		client: &mockSession{},
 		dryRun: false,
+		cachePool: cache.New(1*time.Minute, 1*time.Minute),
 	}
 
 	return provider
@@ -165,5 +173,10 @@ func TestRegister(t *testing.T) {
 }
 
 func TestDeregister(t *testing.T) {
-	// what if deregistering IP failed?
+	provider := NewMockAWSProvider()
+	err := provider.DeregisterIPFromTargetGroup(aws.String("dmai-test-1"), aws.String("1.1.1.1"))
+	assert.Equal(t, err, nil)
+
+	err = provider.DeregisterIPFromTargetGroup(aws.String("dmai-test-2"), aws.String("1.1.1.2"))
+	assert.NotEqual(t, err, nil)
 }

@@ -1,14 +1,18 @@
 package provider
 
 import (
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/linki/instrumented_http"
+	"github.com/patrickmn/go-cache"
+	"github.com/zduymz/elb-inject/pkg/utils"
 	"k8s.io/klog"
-	"strings"
 )
 
 type TargetGroupAPI interface {
@@ -16,9 +20,13 @@ type TargetGroupAPI interface {
 	RegisterTargets(input *elbv2.RegisterTargetsInput) (*elbv2.RegisterTargetsOutput, error)
 	DeregisterTargets(input *elbv2.DeregisterTargetsInput) (*elbv2.DeregisterTargetsOutput, error)
 }
+
+const DefaultCacheTTL = 5*time.Minute
+
 type AWSProvider struct {
-	client TargetGroupAPI
-	dryRun bool
+	client    TargetGroupAPI
+	dryRun    bool
+	cachePool *cache.Cache
 }
 
 // AWSConfig contains configuration to create a new AWS provider.
@@ -66,8 +74,9 @@ func NewAWSProvider(awsConfig AWSConfig) (*AWSProvider, error) {
 	}
 
 	provider := &AWSProvider{
-		client: elbv2.New(awsSession),
-		dryRun: awsConfig.DryRun,
+		client:    elbv2.New(awsSession),
+		dryRun:    awsConfig.DryRun,
+		cachePool: cache.New(DefaultCacheTTL, 10*time.Minute),
 	}
 
 	return provider, nil
@@ -76,6 +85,11 @@ func NewAWSProvider(awsConfig AWSConfig) (*AWSProvider, error) {
 // Return targetGroup in map[Name: ARN]
 // I only care the targetGroup with TargetType is IP
 func (p *AWSProvider) getTargetGroups() (map[string]*string, error) {
+	foo, found := p.cachePool.Get("tg")
+	if found {
+		klog.V(4).Info("Target Group Cache hit")
+		return foo.(map[string]*string), nil
+	}
 	targetGroups := make(map[string]*string)
 	describeTargetGroupsInput := &elbv2.DescribeTargetGroupsInput{
 		PageSize: aws.Int64(400),
@@ -102,6 +116,7 @@ func (p *AWSProvider) getTargetGroups() (map[string]*string, error) {
 		}
 	}
 	klog.V(4).Infof("TargetGroups available: %v", targetGroups)
+	p.cachePool.Set("tg", targetGroups, DefaultCacheTTL)
 	return targetGroups, nil
 }
 
@@ -134,29 +149,32 @@ func (p *AWSProvider) RegisterIPToTargetGroup(targetGroupName *string, IPAddress
 	return nil
 }
 
-func (p *AWSProvider) DeregisterIPFromTargetGroup(targetGroupName string, IPAddress string) error {
+func (p *AWSProvider) DeregisterIPFromTargetGroup(targetGroupName *string, IPAddress *string) error {
 	targetGroups, err := p.getTargetGroups()
 	if err != nil {
 		return err
 	}
 
-	if exist := targetGroups[targetGroupName]; exist == nil {
-		klog.Errorf("TargetGroupName: %s is not found", targetGroupName)
+	if exist := targetGroups[*targetGroupName]; exist == nil {
+		klog.Errorf("TargetGroupName: %s is not found", *targetGroupName)
 	}
 
 	target := &elbv2.TargetDescription{
-		Id: &IPAddress,
+		Id: IPAddress,
 	}
 
 	params := &elbv2.DeregisterTargetsInput{
-		TargetGroupArn: targetGroups[targetGroupName],
+		TargetGroupArn: targetGroups[*targetGroupName],
 		Targets:        []*elbv2.TargetDescription{target},
 	}
 
 	// TODO: should add context and retry for aws request.
 	// should use DeregisterTargetsWithContext
 	if _, err := p.client.DeregisterTargets(params); err != nil {
-		return err
+		return utils.AWSDeregisterError{
+			Err: err,
+			TargetGroupARN: *targetGroups[*targetGroupName],
+		}
 	}
 
 	return nil

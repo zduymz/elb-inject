@@ -10,7 +10,7 @@ import (
 	"k8s.io/klog"
 
 	"github.com/zduymz/elb-inject/pkg/apis/elb-inject"
-	"github.com/zduymz/elb-inject/pkg/controller"
+	ctlr "github.com/zduymz/elb-inject/pkg/controller"
 	//clientset "k8s.io/sample-controller/pkg/generated/clientset/versioned"
 	//informers "k8s.io/sample-controller/pkg/generated/informers/externalversions"
 	"github.com/zduymz/elb-inject/pkg/signals"
@@ -38,7 +38,7 @@ func main() {
 	// (client kubernetes.Interface, defaultResync time.Duration)
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 
-	controller, err := controller.NewController(kubeInformerFactory.Core().V1().Pods(), kubeClient, &config)
+	controller, err := ctlr.NewController(kubeInformerFactory.Core().V1().Pods(), kubeClient, &config)
 	if err != nil {
 		klog.Fatalf("Error building kubernetes controller: %s", err.Error())
 	}
