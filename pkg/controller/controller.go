@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"github.com/zduymz/elb-inject/pkg/apis/elb-inject"
 	"github.com/zduymz/elb-inject/pkg/provider"
@@ -19,8 +20,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 )
-
-const controllerAgentName = "what the fucking name"
 
 const (
 	// add to pod when injection is done
@@ -217,7 +216,8 @@ func (c *Controller) syncHandler(key string) error {
 func (c *Controller) updatePodAnnotation(po *corev1.Pod) error {
 	poCopy := po.DeepCopy()
 	poCopy.Annotations[annotationStatus] = po.Status.PodIP
-	_, err := c.kubeclientset.CoreV1().Pods(poCopy.GetNamespace()).Update(poCopy)
+	ctx := context.Background()
+	_, err := c.kubeclientset.CoreV1().Pods(poCopy.GetNamespace()).Update(ctx, poCopy, metav1.UpdateOptions{})
 	return err
 }
 
@@ -303,7 +303,7 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 
 	if err := c.provider.DeregisterIPFromTargetGroup(targetGroup, podIP); err != nil {
 		klog.Errorf("Can not deregister pod %s[%s] from %s. Reason: %v", podName, podIP, targetGroup, err)
-		c.slack.SendSlackNotification(fmt.Sprintf("```Can not deregister pod %s[%s] from %s. Reason: %v```", podName, podIP, targetGroup, err))
+		_ = c.slack.SendSlackNotification(fmt.Sprintf("```Can not deregister pod %s[%s] from %s. Reason: %v```", podName, podIP, targetGroup, err))
 		return
 	}
 	klog.Infof("Deregister [%s] from [%s] sucessfully", podIP, targetGroup)

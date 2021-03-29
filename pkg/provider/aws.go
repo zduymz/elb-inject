@@ -142,6 +142,7 @@ func (p *AWSProvider) DeregisterIPFromTargetGroup(targetGroupName string, IPAddr
 
 	if exist := targetGroups[targetGroupName]; exist == nil {
 		klog.Errorf("TargetGroupName: %s is not found", targetGroupName)
+		return nil
 	}
 
 	target := &elbv2.TargetDescription{
