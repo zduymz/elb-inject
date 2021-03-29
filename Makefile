@@ -17,11 +17,9 @@ docker: linux
 	docker build --no-cache --squash --rm -t ${NAME}:${VERSION} .
 	docker tag ${NAME}:${VERSION} duym/${NAME}:${VERSION}
 	docker push duym/${NAME}:${VERSION}
-	docker tag duym/${NAME}:${VERSION} duym/${NAME}:latest
-	docker push duym/${NAME}:latest
 
 run:
-	./build/macos/${NAME} -kubeconfig=./staging.config -aws.creds=/Users/dmai/.aws/credentials
+	./build/macos/${NAME} -kubeconfig=/Users/dmai/.kube/staging -aws.creds=/Users/dmai/.aws/credentials
 
 test:
 	go test -v -race $(shell go list ./... )

@@ -3,11 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"time"
+
 	"github.com/zduymz/elb-inject/pkg/apis/elb-inject"
 	"github.com/zduymz/elb-inject/pkg/provider"
 	"github.com/zduymz/elb-inject/pkg/utils"
 	"k8s.io/client-go/kubernetes"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -140,15 +142,17 @@ func (c *Controller) processNextWorkItem() bool {
 			return nil
 		}
 		// Run the syncHandler, passing it the namespace/name string of the
-		klog.Infof("Start: %s", key)
+		klog.V(4).Infof("[Register] Start: %s", key)
 		if err := c.syncHandler(key); err != nil {
+			if reflect.TypeOf(err) != reflect.TypeOf(utils.PodNotRun{}) {
+				klog.V(4).Infof("Warning '%s': %v, Requeue", key, err)
+			}
 			c.workqueue.AddRateLimited(key)
-			klog.V(4).Infof("error '%s': %v, Requeue", key, err)
 			return nil
 		}
 		// Finally, if no error occurs we Forget this item so it does not
 		// get queued again until another change happens.
-		klog.Infof("Finish: '%s'", key)
+
 		c.workqueue.Forget(obj)
 		return nil
 	}(obj)
@@ -162,54 +166,53 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 func (c *Controller) syncHandler(key string) error {
-	// Convert the namespace/name string into a distinct namespace and name
+	// return: nil -> ignore
+	//		   error -> re-enqueue
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
+		klog.Warningf("invalid resource key: %s", key)
 		return nil
 	}
 
 	// Get the pod with this namespace/name
 	po, err := c.podLister.Pods(namespace).Get(name)
 	if err != nil {
-		// If no longer exist, in which case we stop processing
 		if errors.IsNotFound(err) {
-			klog.Warningf("object '%s' in workqueue no longer exists", key)
+			klog.Warningf("pod '%s' no longer exists", key)
 			return nil
 		}
 
+		// Unknown error
 		return err
 	}
 
 	// make sure pod is running
 	if !c.isPodRunning(po) {
-		klog.Errorf("Pod %s : %s ", po.GetName(), po.Status.Phase)
-		return fmt.Errorf("Pod not running")
+		klog.V(4).Infof("Pod %s : %s ", po.GetName(), po.Status.Phase)
+		return &utils.PodNotRun{}
 	}
-
-	// TODO: need to check is ready to serve traffic
-	// Not sure this is good solution but it worked for now
-	//if !c.isPodReady(po) {
-	//	klog.Infof("Pod [%s] is not ready, can not inject", po.GetName())
-	//	return fmt.Errorf("Pod is not ready")
-	//}
 
 	// double check
 	if should := c.shouldInject(po); !should {
 		return nil
 	}
 
+	if po.Annotations[annotationStatus] != "" {
+		return nil
+	}
+
 	targetGroup := po.Annotations[annotationInject]
-	klog.Infof("Starting register [%s] to Target: [%s]", po.Status.PodIP, targetGroup)
+	klog.Infof("[Register] Attaching [%s %s] to Target: [%s]", po.Name, po.Status.PodIP, targetGroup)
 	if err := c.provider.RegisterIPToTargetGroup(&targetGroup, &po.Status.PodIP); err != nil {
 		return err
 	}
 
-	klog.Info("Adding `injected` annotation to pod template")
+	klog.V(4).Infof("Adding `injected` annotation to pod %s", po.Name)
 	if err := c.updatePodAnnotation(po); err != nil {
 		return err
 	}
 
+	klog.Infof("[Register] Attaching [%s %s] to Target: [%s] successfully", po.Name, po.Status.PodIP, targetGroup)
 	return nil
 }
 
@@ -251,18 +254,14 @@ func (c *Controller) handleAddObject(obj interface{}) {
 
 	klog.V(4).Infof("Processing object: %s", object.GetName())
 
-	// TODO: should we check object KIND before converting?
-	po, err := c.podLister.Pods(object.GetNamespace()).Get(object.GetName())
-	if err != nil {
-		klog.Infof("Ignoring orphaned object [%s] ", object.GetName())
-		return
-	}
+	po := obj.(*corev1.Pod)
 
 	if should := c.shouldInject(po); should {
-		klog.Infof("Injecting object: %s", po.GetName())
+		klog.V(4).Infof("Injecting object: %s", po.GetName())
 		c.enqueuePod(po)
 		return
 	}
+	klog.V(4).Infof("Ignore: %s", po.GetName())
 }
 
 func (c *Controller) handleDeleteObject(obj interface{}) {
@@ -291,22 +290,31 @@ func (c *Controller) handleDeleteObject(obj interface{}) {
 	targetGroup := po.Annotations[annotationInject]
 	// pod should have been injected
 	if po.Annotations[annotationStatus] == "" {
-		klog.Errorf("Not found %s in %s", annotationStatus, podName)
 		return
 	}
 
 	// pod should contain annotationInject
 	if targetGroup == "" {
-		klog.Errorf("Not found %s in %s", annotationInject, podName)
 		return
 	}
 
-	if err := c.provider.DeregisterIPFromTargetGroup(targetGroup, podIP); err != nil {
-		klog.Errorf("Can not deregister pod %s[%s] from %s. Reason: %v", podName, podIP, targetGroup, err)
-		_ = c.slack.SendSlackNotification(fmt.Sprintf("```Can not deregister pod %s[%s] from %s. Reason: %v```", podName, podIP, targetGroup, err))
+	klog.Infof("[Deregister] [%s %s] from [%s]", podName, podIP, targetGroup)
+	if err := c.provider.DeregisterIPFromTargetGroup(&targetGroup, &podIP); err != nil {
+		klog.Errorf("[Deregister] [%s %s] from [%s] failed. Reason: %v", podName, podIP, targetGroup, err)
+
+		if reflect.TypeOf(err) == reflect.TypeOf(utils.AWSDeregisterError{}) {
+			err1 := err.(utils.AWSDeregisterError)
+			slackMsg := fmt.Sprintf("```Can not deregister pod %s[%s] from %s. Reason: %v \n aws elbv2 deregister-targets --target-group-arn %s --targets Id=%s```", podName, podIP, targetGroup, err1.Error(), err1.TargetGroupARN, podIP)
+
+			if err := c.slack.SendSlackNotification(slackMsg); err != nil {
+				klog.Errorf("Slack sending error %v", err)
+				klog.Error(slackMsg)
+			}
+		}
+
 		return
 	}
-	klog.Infof("Deregister [%s] from [%s] sucessfully", podIP, targetGroup)
+	klog.Infof("[Deregister] [%s %s] from [%s] successfully", podName, podIP, targetGroup)
 }
 
 func (c *Controller) shouldInject(pod *corev1.Pod) bool {
@@ -333,7 +341,7 @@ func (c *Controller) shouldInject(pod *corev1.Pod) bool {
 
 func (c *Controller) isPodReady(pod *corev1.Pod) bool {
 	for _, containerStatus := range pod.Status.ContainerStatuses {
-		if ! containerStatus.Ready {
+		if !containerStatus.Ready {
 			return false
 		}
 	}
