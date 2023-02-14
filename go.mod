@@ -3,7 +3,7 @@ module github.com/zduymz/elb-inject
 go 1.15
 
 require (
-	github.com/aws/aws-sdk-go v1.29.24
+	github.com/aws/aws-sdk-go v1.34.0
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/linki/instrumented_http v0.3.0
